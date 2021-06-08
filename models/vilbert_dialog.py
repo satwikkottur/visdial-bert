@@ -142,7 +142,7 @@ class BertConfig(object):
         hidden_act="gelu",
         hidden_dropout_prob=0.1,
         attention_probs_dropout_prob=0.1,
-        max_position_embeddings=512,
+        max_position_embeddings=1024,
         type_vocab_size=2,
         initializer_range=0.02,
         v_feature_size=2048,
@@ -300,8 +300,9 @@ class BertEmbeddingsDialog(nn.Module):
         super(BertEmbeddingsDialog, self).__init__()
         self.word_embeddings = nn.Embedding(config.vocab_size, config.hidden_size)
         self.position_embeddings = nn.Embedding(config.max_position_embeddings, config.hidden_size)
-        max_seq_len = 256
-        d_model = config.hidden_size        
+        # Deep CLEVR-Dialog. Change this.
+        max_seq_len = 1024
+        d_model = config.hidden_size
         pe = torch.zeros(max_seq_len, d_model)
         for pos in range(max_seq_len):
             for i in range(0, d_model, 2):
@@ -1019,7 +1020,8 @@ class BertPreTrainingHeads(nn.Module):
     def __init__(self, config, bert_model_embedding_weights):
         super(BertPreTrainingHeads, self).__init__()
         self.predictions = BertLMPredictionHead(config, bert_model_embedding_weights)
-        self.bi_seq_relationship = nn.Linear(config.bi_hidden_size, 2)
+        # NOTE: Manually set this to 29 (number of answers).
+        self.bi_seq_relationship = nn.Linear(config.bi_hidden_size, 29)
         self.imagePredictions = BertImagePredictionHead(config)
         self.fusion_method = config.fusion_method
         self.dropout = nn.Dropout(0.1)
@@ -1436,7 +1438,6 @@ class BertForMultiModalPreTraining(BertPreTrainedModel):
         self.cls = BertPreTrainingHeads(
             config, self.bert.embeddings.word_embeddings.weight
         )
-        
         self.apply(self.init_bert_weights)
         self.predict_feature = config.predict_feature
         self.loss_fct = CrossEntropyLoss(ignore_index=-1)
@@ -1498,14 +1499,14 @@ class BertForMultiModalPreTraining(BertPreTrainedModel):
                 masked_img_loss = torch.sum(
                     img_loss * (image_label == 1).unsqueeze(2).float()
                 ) / max(torch.sum((image_label == 1)), 0)
-            
             # masked_img_loss = torch.sum(img_loss) / (img_loss.shape[0] * img_loss.shape[1])
             masked_lm_loss = self.loss_fct(
                 prediction_scores_t.view(-1, self.config.vocab_size),
                 masked_lm_labels.view(-1),
             )
+            # NOTE: Changed this to 29 (#classes) for CLEVR-Dialog.
             next_sentence_loss = self.loss_fct(
-                seq_relationship_score.view(-1, 2), next_sentence_label.view(-1)
+                seq_relationship_score.view(-1, 29), next_sentence_label.view(-1)
             )
             # total_loss = masked_lm_loss + next_sentence_loss + masked_img_loss
             return masked_lm_loss.unsqueeze(0), masked_img_loss.unsqueeze(0), next_sentence_loss.unsqueeze(0), sequence_output_t, prediction_scores_t, seq_relationship_score
