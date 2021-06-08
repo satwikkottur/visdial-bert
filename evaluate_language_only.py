@@ -7,7 +7,7 @@ from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from dataloader.dataloader_clevrdialog import CLEVRDialogDataset
 import options
-from models.visual_dialog_encoder import VisualDialogEncoder
+from models.language_only_dialog_encoder import DialogEncoder
 import torch.optim as optim
 from utils.visualize import VisdomVisualize
 import pprint
@@ -21,26 +21,27 @@ from utils.data_utils import sequence_mask, batch_iter
 from utils.optim_utils import WarmupLinearScheduleNonZero
 import json
 import logging
-from train import forward
+from train_language_only_baseline import forward
 
 
-def eval_ai_generate(dataloader, params, eval_batch_size, split="test"):
-    ranks_json = []
+def eval_ai_generate(dataloader, params, eval_batch_size, dialog_encoder):
     dialog_encoder.eval()
     batch_idx = 0
     with torch.no_grad():
-        batch_size = 500 * (params["n_gpus"] / 8)
-        batch_size = min(
-            [1, 2, 4, 5, 100, 1000, 200, 8, 10, 40, 50, 500, 20, 25, 250, 125],
-            key=lambda x: abs(x - batch_size) if x <= batch_size else float("inf"),
-        )
-        batch_size = min(eval_batch_size, batch_size)
+        # batch_size = 500 * (params["n_gpus"] / 8)
+        # batch_size = min(
+        #     [1, 2, 4, 5, 100, 1000, 200, 8, 10, 40, 50, 500, 20, 25, 250, 125],
+        #     key=lambda x: abs(x - batch_size) if x <= batch_size else float("inf"),
+        # )
+        # batch_size = min(eval_batch_size, batch_size)
+        batch_size = eval_batch_size
         print("batch size for evaluation", batch_size)
         outputs = []
-        for epochId, _, batch in batch_iter(dataloader, params):
-            if epochId == 1:
+        if params["overfit"]:
+            batch_size = 100
+        for epoch_id, _, batch in batch_iter(dataloader, params):
+            if epoch_id == 1:
                 break
-
             tokens = batch["tokens"]
             num_rounds = tokens.shape[1]
             num_options = tokens.shape[2]
@@ -54,53 +55,24 @@ def eval_ai_generate(dataloader, params, eval_batch_size, split="test"):
             hist_len = batch["hist_len"]
             hist_len = hist_len.view(-1)
 
-            # get image features
-            features = batch["image_feat"]
-            spatials = batch["image_loc"]
-            image_mask = batch["image_mask"]
-
-            # expand the image features to match those of tokens etc.
-            if features.shape[0] != eval_batch_size:
-                print("Skipping batch!")
-                continue
-            max_num_regions = features.shape[-2]
-            features = (
-                features.unsqueeze(1)
-                .unsqueeze(1)
-                .expand(eval_batch_size, num_rounds, num_options, max_num_regions, 2048)
-                .contiguous()
-            )
-            spatials = (
-                spatials.unsqueeze(1)
-                .unsqueeze(1)
-                .expand(eval_batch_size, num_rounds, num_options, max_num_regions, 5)
-                .contiguous()
-            )
-            image_mask = (
-                image_mask.unsqueeze(1)
-                .unsqueeze(1)
-                .expand(eval_batch_size, num_rounds, num_options, max_num_regions)
-                .contiguous()
-            )
-
-            features = features.view(-1, max_num_regions, 2048)
-            spatials = spatials.view(-1, max_num_regions, 5)
-            image_mask = image_mask.view(-1, max_num_regions)
-
             gt_labels = batch["next_sentence_labels"].view(-1)
 
+            # print(
+            #     tokens.shape[0],
+            #     segments.shape[0],
+            #     sep_indices.shape[0],
+            #     mask.shape[0],
+            #     hist_len.shape[0],
+            #     num_rounds * num_options * eval_batch_size
+            # )
             assert (
                 tokens.shape[0]
                 == segments.shape[0]
                 == sep_indices.shape[0]
                 == mask.shape[0]
                 == hist_len.shape[0]
-                == features.shape[0]
-                == spatials.shape[0]
-                == image_mask.shape[0]
                 == num_rounds * num_options * eval_batch_size
             )
-
             assert (eval_batch_size * num_rounds * num_options) // batch_size == (
                 eval_batch_size * num_rounds * num_options
             ) / batch_size
@@ -114,13 +86,9 @@ def eval_ai_generate(dataloader, params, eval_batch_size, split="test"):
                 item['sep_indices'] = sep_indices[start:end, :]
                 item['mask'] = mask[start:end, :]
                 item['hist_len'] = hist_len[start:end]
-
-                item['image_feat'] = features[start:end, : , :]
-                item['image_loc'] = spatials[start:end, : , :]
-                item['image_mask'] = image_mask[start:end, :]
                 item["gt_labels"] = gt_labels[start:end]
 
-                _, _, _, _, nsp_scores = forward(
+                _, _, _, nsp_scores = forward(
                     dialog_encoder,
                     item,
                     params,
@@ -136,8 +104,7 @@ def eval_ai_generate(dataloader, params, eval_batch_size, split="test"):
                 outputs.append(model_matches)
             print("Eval: {}".format(batch_idx))
             batch_idx += 1
-            if batch_idx > 20:
-                break
+
     dialog_encoder.train()
     print("tot eval batches", batch_idx)
     all_metrics = {"accuracy": torch.mean(torch.cat(outputs).float())}
@@ -149,7 +116,8 @@ if __name__ == "__main__":
     params = options.read_command_line()
     pprint.pprint(params)
     dataset = CLEVRDialogDataset(params)
-    eval_batch_size = params["batch_size"] // 2
+    eval_batch_size = params["batch_size"]
+    # eval_batch_size = params["batch_size"] // 2
     split = "test"
     dataset.split = split
     dataloader = DataLoader(
@@ -163,7 +131,7 @@ if __name__ == "__main__":
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     params["device"] = device
-    dialog_encoder = VisualDialogEncoder(params["model_config"])
+    dialog_encoder = DialogEncoder()
 
     if params["start_path"]:
         pretrained_dict = torch.load(params["start_path"])
@@ -180,6 +148,6 @@ if __name__ == "__main__":
 
     dialog_encoder = nn.DataParallel(dialog_encoder)
     dialog_encoder.to(device)
-    ranks_json = eval_ai_generate(dataloader, params, eval_batch_size, split=split)
+    ranks_json = eval_ai_generate(dataloader, params, eval_batch_size, dialog_encoder)
 
     # json.dump(ranks_json, open(params["save_name"] + "_predictions.txt", "w"))

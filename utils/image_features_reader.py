@@ -115,8 +115,9 @@ class ImageFeaturesH5Reader(object):
                 image_h = int(item['image_h'])
                 image_w = int(item['image_w'])
                 num_boxes = int(item['num_boxes'])
-                cls_prob = np.frombuffer(base64.b64decode(item['cls_prob']), dtype=np.float32).reshape(num_boxes, 1601)
+                # cls_prob = np.frombuffer(base64.b64decode(item['cls_prob']), dtype=np.float32).reshape(num_boxes, 1601)
                 # add an extra row at the top for the <IMG> tokens
+                cls_prob = np.zeros((num_boxes, 1601), dtype=np.float32)
                 g_cls_prob = np.zeros(1601, dtype=np.float32)
                 g_cls_prob[0] = 1
                 cls_prob = np.concatenate([np.expand_dims(g_cls_prob,axis=0), cls_prob], axis=0)

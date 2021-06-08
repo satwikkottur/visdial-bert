@@ -49,6 +49,13 @@ def read_command_line(argv=None):
     parser.add_argument('-lr',default=2e-5,type=float,help='learning rate')
     parser.add_argument('-image_lr',default=2e-5,type=float,help='learning rate for vision params')
 
+    parser.add_argument(
+        '-ignore_history', default=False, action='store_true',
+        help="Ignore the history"
+    )
+    parser.add_argument(
+        '-deep_dialogs', default=False, action='store_true', help="Deep CLEVR-Dialog"
+    )
     parser.add_argument('-overfit', action='store_true', help='overfit for debugging')
     parser.add_argument('-continue', action='store_true', help='continue training')
 
@@ -87,9 +94,9 @@ def read_command_line(argv=None):
             timeStamp = strftime('%d-%b-%y-%X-%a', gmtime())
             parsed['save_path'] = os.path.join(parsed['save_path'], timeStamp)
             parsed['save_path'] += '_{:0>6d}{}'.format(random.randint(0, 10e6),parsed['visdom_env'])
-   
+
         assert parsed['sequences_per_image'] <= 8 
-        assert parsed['visdial_tot_rounds'] <= 11
+        # assert parsed['visdial_tot_rounds'] <= 11
 
     except IOError as msg:
         parser.error(str(msg))

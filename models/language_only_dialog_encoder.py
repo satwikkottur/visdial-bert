@@ -9,6 +9,12 @@ class DialogEncoder(nn.Module):
     def __init__(self):
         super(DialogEncoder, self).__init__()
         self.bert_pretrained = BertForPretrainingDialog.from_pretrained('bert-base-uncased',output_hidden_states=True)
+
+        # NOTE: Replace the binary classifier to 29-way classifier for CLEVR-Dialog.
+        in_features = self.bert_pretrained.cls.seq_relationship.in_features
+        self.bert_pretrained.cls.seq_relationship = (
+            nn.Linear(in_features, 29, bias=True)
+        )
         self.bert_pretrained.train()
         # add additional layers for the inconsistency loss
         assert self.bert_pretrained.config.output_hidden_states == True
